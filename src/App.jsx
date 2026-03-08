@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Analytics } from "@vercel/analytics/react";
 
 /* ═══════════════════════════════════════════════════════════════════
    ORION — Celestial Self-Evolution Platform  v3.0
@@ -2732,6 +2733,7 @@ export default function App() {
           </main>
         </>
       )}
+      <Analytics />
     </>
   );
 }
