@@ -123,6 +123,180 @@ const GLOBAL_CSS = `
   .fadeUp-3 { animation-delay: 0.20s; }
   .fadeUp-4 { animation-delay: 0.28s; }
   .fadeUp-5 { animation-delay: 0.36s; }
+
+  /* ── Mobile bottom nav ── */
+  .mobile-nav {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 50;
+    background: rgba(8,10,16,0.97);
+    backdrop-filter: blur(24px);
+    border-top: 1px solid rgba(212,175,100,0.08);
+    padding: 8px 0 env(safe-area-inset-bottom, 8px);
+  }
+  .mobile-nav-inner {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .mobile-nav-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px 8px;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  .mobile-nav-btn span:first-child { font-size: 16px; }
+  .mobile-nav-btn span:last-child {
+    font-size: 8px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* ── Mobile drawer overlay ── */
+  .drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 40;
+    backdrop-filter: blur(4px);
+  }
+  .drawer-overlay.open { display: block; }
+
+  /* ── Sidebar drawer on mobile ── */
+  .sidebar-drawer {
+    transform: translateX(-100%);
+    transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+  }
+  .sidebar-drawer.open {
+    transform: translateX(0);
+  }
+
+  /* ── Responsive grid helpers ── */
+  .grid-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  @media (max-width: 768px) {
+    /* Show mobile nav, hide desktop sidebar */
+    .mobile-nav { display: block; }
+    .desktop-sidebar { display: none !important; }
+
+    /* Main content takes full width */
+    .main-content {
+      margin-left: 0 !important;
+      padding: 20px 16px 90px !important;
+    }
+
+    /* Cards full width */
+    .grid-2col {
+      grid-template-columns: 1fr;
+    }
+
+    /* Sticky podcast player adjusts */
+    .sticky-player {
+      left: 0 !important;
+    }
+
+    /* Week bar chart smaller */
+    .week-bars {
+      height: 60px !important;
+    }
+
+    /* Auth card padding */
+    .auth-card {
+      padding: 28px 20px !important;
+    }
+
+    /* Entry screen text */
+    .entry-title {
+      font-size: 52px !important;
+    }
+
+    /* Focus timer circle smaller */
+    .timer-circle {
+      width: 200px !important;
+      height: 200px !important;
+    }
+
+    /* Dashboard columns stack */
+    .dashboard-cols {
+      flex-direction: column !important;
+    }
+
+    /* Wellness ring section */
+    .wellness-flex {
+      flex-direction: column !important;
+      align-items: flex-start !important;
+    }
+
+    /* Podcast grid */
+    .podcast-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Modal/expanded player */
+    .expanded-player {
+      margin: 0 -16px !important;
+      border-radius: 0 !important;
+    }
+
+    /* Vault grid */
+    .vault-grid {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Ambient grid */
+    .ambient-grid {
+      grid-template-columns: 1fr 1fr !important;
+    }
+
+    /* Identity cards */
+    .identity-grid {
+      flex-direction: column !important;
+    }
+
+    /* Text size adjustments */
+    .hero-number {
+      font-size: 42px !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .main-content {
+      padding: 16px 12px 90px !important;
+    }
+    .ambient-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .entry-title {
+      font-size: 40px !important;
+    }
+  }
+
+  /* iPad landscape - show sidebar but narrower */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .desktop-sidebar {
+      width: 180px !important;
+    }
+    .main-content {
+      margin-left: 180px !important;
+      padding: 32px 28px 80px !important;
+    }
+    .sticky-player {
+      left: 180px !important;
+    }
+  }
 `;
 
 // ── Design tokens ────────────────────────────────────────────────
@@ -632,29 +806,90 @@ const NAV = [
   {id:"analytics", label:"Analytics", icon:"◉"},
 ];
 
-function Sidebar({ active, setActive, user, onLogout }) {
+const MOBILE_NAV = [
+  {id:"dashboard", label:"Home",    icon:"◈"},
+  {id:"focus",     label:"Focus",   icon:"◎"},
+  {id:"podcasts",  label:"Listen",  icon:"◐"},
+  {id:"reflect",   label:"Reflect", icon:"◇"},
+  {id:"vault",     label:"Vault",   icon:"▣"},
+];
+
+function Sidebar({ active, setActive, user, onLogout, drawerOpen, setDrawerOpen }) {
   return (
-    <nav style={{position:"fixed",left:0,top:0,bottom:0,width:216,zIndex:20,background:"rgba(8,10,16,0.88)",backdropFilter:"blur(24px)",borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"36px 0"}}>
-      <div style={{padding:"0 26px 32px",borderBottom:`1px solid ${T.border}`}}>
-        <div style={{fontFamily:T.serif,fontSize:20,fontWeight:300,letterSpacing:"0.2em",color:T.text}}>ORION</div>
-        <div style={{fontFamily:T.body,fontSize:10,letterSpacing:"0.24em",color:T.goldDim,marginTop:3,textTransform:"uppercase",fontStyle:"italic"}}>Observatory</div>
-      </div>
-      <div style={{flex:1,padding:"24px 0",overflowY:"auto"}}>
-        {NAV.map((item,i)=><NavItem key={item.id} item={item} active={active} setActive={setActive} delay={i*0.04} />)}
-      </div>
-      <div style={{padding:"20px 26px",borderTop:`1px solid ${T.border}`}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-          <div style={{width:30,height:30,borderRadius:"50%",background:T.goldFaint,border:`1px solid ${T.goldDim}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:T.serif,fontSize:13,color:T.gold}}>
-            {user?.name?.[0]?.toUpperCase()||"✦"}
-          </div>
-          <div>
-            <div style={{fontFamily:T.body,fontSize:13,color:T.textMid,letterSpacing:"0.04em"}}>{user?.name}</div>
-            <div style={{fontFamily:T.body,fontSize:10,color:T.textDim,letterSpacing:"0.06em"}}>Active</div>
-          </div>
+    <>
+      {/* Desktop sidebar */}
+      <nav className="desktop-sidebar" style={{position:"fixed",left:0,top:0,bottom:0,width:216,zIndex:30,background:"rgba(8,10,16,0.88)",backdropFilter:"blur(24px)",borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"36px 0"}}>
+        <div style={{padding:"0 26px 32px",borderBottom:`1px solid ${T.border}`}}>
+          <div style={{fontFamily:T.serif,fontSize:20,fontWeight:300,letterSpacing:"0.2em",color:T.text}}>ORION</div>
+          <div style={{fontFamily:T.body,fontSize:10,letterSpacing:"0.24em",color:T.goldDim,marginTop:3,textTransform:"uppercase",fontStyle:"italic"}}>Observatory</div>
         </div>
-        <button onClick={onLogout} style={{background:"none",border:"none",fontFamily:T.body,fontSize:10,color:"rgba(180,170,155,0.25)",cursor:"pointer",letterSpacing:"0.15em",textTransform:"uppercase",padding:0}}>Sign out</button>
+        <div style={{flex:1,padding:"24px 0",overflowY:"auto"}}>
+          {NAV.map((item,i)=><NavItem key={item.id} item={item} active={active} setActive={setActive} delay={i*0.04} />)}
+        </div>
+        <div style={{padding:"20px 26px",borderTop:`1px solid ${T.border}`}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <div style={{width:30,height:30,borderRadius:"50%",background:T.goldFaint,border:`1px solid ${T.goldDim}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:T.serif,fontSize:13,color:T.gold}}>
+              {user?.name?.[0]?.toUpperCase()||"✦"}
+            </div>
+            <div>
+              <div style={{fontFamily:T.body,fontSize:13,color:T.textMid,letterSpacing:"0.04em"}}>{user?.name}</div>
+              <div style={{fontFamily:T.body,fontSize:10,color:T.textDim,letterSpacing:"0.06em"}}>Active</div>
+            </div>
+          </div>
+          <button onClick={onLogout} style={{background:"none",border:"none",fontFamily:T.body,fontSize:10,color:"rgba(180,170,155,0.25)",cursor:"pointer",letterSpacing:"0.15em",textTransform:"uppercase",padding:0}}>Sign out</button>
+        </div>
+      </nav>
+
+      {/* Mobile drawer overlay */}
+      <div className={`drawer-overlay${drawerOpen?" open":""}`} onClick={()=>setDrawerOpen(false)} />
+
+      {/* Mobile full drawer (all 8 items) */}
+      <nav className={`sidebar-drawer${drawerOpen?" open":""}`} style={{position:"fixed",left:0,top:0,bottom:0,width:260,zIndex:50,background:"rgba(8,10,16,0.98)",backdropFilter:"blur(24px)",borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"48px 0 32px"}}>
+        <div style={{padding:"0 26px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontFamily:T.serif,fontSize:20,fontWeight:300,letterSpacing:"0.2em",color:T.text}}>ORION</div>
+            <div style={{fontFamily:T.body,fontSize:10,letterSpacing:"0.24em",color:T.goldDim,marginTop:3,textTransform:"uppercase",fontStyle:"italic"}}>Observatory</div>
+          </div>
+          <button onClick={()=>setDrawerOpen(false)} style={{background:"none",border:"none",color:T.goldDim,fontSize:22,cursor:"pointer",padding:"4px 8px",lineHeight:1}}>✕</button>
+        </div>
+        <div style={{flex:1,padding:"20px 0",overflowY:"auto"}}>
+          {NAV.map((item,i)=>(
+            <NavItem key={item.id} item={item} active={active} setActive={(id)=>{setActive(id);setDrawerOpen(false);}} delay={i*0.04} />
+          ))}
+        </div>
+        <div style={{padding:"20px 26px",borderTop:`1px solid ${T.border}`}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <div style={{width:30,height:30,borderRadius:"50%",background:T.goldFaint,border:`1px solid ${T.goldDim}`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:T.serif,fontSize:13,color:T.gold}}>
+              {user?.name?.[0]?.toUpperCase()||"✦"}
+            </div>
+            <div>
+              <div style={{fontFamily:T.body,fontSize:13,color:T.textMid}}>{user?.name}</div>
+              <div style={{fontFamily:T.body,fontSize:10,color:T.textDim}}>Active</div>
+            </div>
+          </div>
+          <button onClick={onLogout} style={{background:"none",border:"none",fontFamily:T.body,fontSize:10,color:"rgba(180,170,155,0.25)",cursor:"pointer",letterSpacing:"0.15em",textTransform:"uppercase",padding:0}}>Sign out</button>
+        </div>
+      </nav>
+
+      {/* Mobile bottom nav bar */}
+      <div className="mobile-nav">
+        <div className="mobile-nav-inner">
+          {MOBILE_NAV.map(item=>{
+            const isActive=active===item.id;
+            return (
+              <button key={item.id} className="mobile-nav-btn" onClick={()=>setActive(item.id)}>
+                <span style={{fontSize:17,color:isActive?T.gold:T.textDim,transition:"color 0.2s"}}>{item.icon}</span>
+                <span style={{fontFamily:T.body,fontSize:8,letterSpacing:"0.1em",textTransform:"uppercase",color:isActive?T.gold:T.textDim,transition:"color 0.2s"}}>{item.label}</span>
+              </button>
+            );
+          })}
+          <button className="mobile-nav-btn" onClick={()=>setDrawerOpen(true)}>
+            <span style={{fontSize:17,color:T.textDim}}>≡</span>
+            <span style={{fontFamily:T.body,fontSize:8,letterSpacing:"0.1em",textTransform:"uppercase",color:T.textDim}}>More</span>
+          </button>
+        </div>
       </div>
-    </nav>
+    </>
   );
 }
 
@@ -1911,7 +2146,7 @@ function StickyPlayer({ activePodcast, playing, progress, charIndex, totalChars,
   const RATES = [0.75, 0.9, 1.0, 1.1, 1.25];
 
   return (
-    <div style={{
+    <div className="sticky-player" style={{
       position: "fixed", bottom: 0, left: 216, right: 0, zIndex: 40,
       background: "rgba(8,10,16,0.97)", backdropFilter: "blur(24px)",
       borderTop: "1px solid rgba(212,175,100,0.12)",
@@ -2673,6 +2908,7 @@ export default function App() {
   const [contentVis,setContentVis]=useState(false);
   const [vaultNotes,setVaultNotes]=useState(DEFAULT_NOTES);
   const [trackingRefresh,setTrackingRefresh]=useState(0);
+  const [drawerOpen,setDrawerOpen]=useState(false);
 
   function handleEntryDone(){setScreen("auth");}
 
@@ -2724,8 +2960,8 @@ export default function App() {
       {screen==="onboarding" && <OnboardingScreen user={user} onComplete={handleOnboarding} />}
       {screen==="app"&&(
         <>
-          <Sidebar active={active} setActive={handleSetActive} user={user} onLogout={handleLogout} />
-          <main style={{marginLeft:216,minHeight:"100vh",padding:"48px 48px 80px",opacity:contentVis?1:0,transform:contentVis?"translateY(0)":"translateY(12px)",transition:"all 0.6s cubic-bezier(0.16,1,0.3,1)",position:"relative",zIndex:5}}>
+          <Sidebar active={active} setActive={handleSetActive} user={user} onLogout={handleLogout} drawerOpen={drawerOpen} setDrawerOpen={setDrawerOpen} />
+          <main className="main-content" style={{marginLeft:216,minHeight:"100vh",padding:"48px 48px 80px",opacity:contentVis?1:0,transform:contentVis?"translateY(0)":"translateY(12px)",transition:"all 0.6s cubic-bezier(0.16,1,0.3,1)",position:"relative",zIndex:5}}>
             <div style={{maxWidth:960,margin:"0 auto"}}>
               {panels[active]}
             </div>
