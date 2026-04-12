@@ -12,20 +12,58 @@ import { useState, useEffect, useRef, useCallback } from "react";
    • Smooth page transitions preserved
 ═══════════════════════════════════════════════════════════════════ */
 
-// ── Anthropic API helper ────────────────────────────────────────
-async function callClaude(messages, systemPrompt, maxTokens = 1000) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages,
-    }),
+// ── Backend API client ──────────────────────────────────────────
+const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:4000/api";
+
+const tokenStore = {
+  get: () => localStorage.getItem("orion_access_token"),
+  set: (t) => localStorage.setItem("orion_access_token", t),
+  clear: () => localStorage.removeItem("orion_access_token"),
+};
+
+async function apiFetch(path, options = {}) {
+  const token = tokenStore.get();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  };
+  let res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...options,
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
   });
-  const data = await res.json();
-  return data.content?.map(b => b.text || "").join("") || "";
+  if (res.status === 401) {
+    const err = await res.clone().json().catch(() => ({}));
+    if (err.code === "TOKEN_EXPIRED") {
+      const rr = await fetch(`${API_BASE}/auth/refresh`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } });
+      if (rr.ok) {
+        const { accessToken } = await rr.json();
+        tokenStore.set(accessToken);
+        res = await fetch(`${API_BASE}${path}`, { credentials: "include", ...options, headers: { ...headers, Authorization: `Bearer ${accessToken}` }, body: options.body ? JSON.stringify(options.body) : undefined });
+      } else { tokenStore.clear(); }
+    }
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: "Request failed" }));
+    throw Object.assign(new Error(body.error || "Request failed"), { status: res.status, body });
+  }
+  return res.json();
+}
+
+// Secure backend AI calls — API key stays server-side
+async function callClaude(messages, systemPrompt, maxTokens = 1000) {
+  // Used only for strategist (stateful chat). Other AI features use dedicated endpoints.
+  try {
+    const data = await apiFetch("/ai/strategist", {
+      method: "POST",
+      body: { message: messages[messages.length - 1]?.content || "", history: messages.slice(0, -1) },
+    });
+    return data.reply || "";
+  } catch {
+    return "";
+  }
 }
 
 // ── Storage helpers (localStorage with daily-key isolation) ─────
@@ -664,11 +702,39 @@ function AuthScreen({ onAuth }) {
     boxSizing:"border-box",
   };
 
-  function handleSubmit() {
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit() {
     if(!email||!pass){setErr("Please fill all fields.");return;}
     if(mode==="signup"&&!name){setErr("Please enter your name.");return;}
-    const user={email,name:name||email.split("@")[0],isNew:mode==="signup"};
-    onAuth(user);
+    setLoading(true); setErr("");
+    try {
+      if (mode === "signup") {
+        const res = await fetch(`${API_BASE}/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, email, password: pass }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setErr(data.error || "Registration failed."); setLoading(false); return; }
+        setErr("✓ Check your email to verify your account before signing in.");
+        setLoading(false); return;
+      } else {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: pass }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { setErr(data.error || data.message || "Invalid email or password."); setLoading(false); return; }
+        tokenStore.set(data.accessToken);
+        onAuth(data.user);
+      }
+    } catch(e) {
+      setErr("Connection error. Please check your internet and try again.");
+    }
+    setLoading(false);
   }
 
   return (
@@ -687,7 +753,7 @@ function AuthScreen({ onAuth }) {
             <input value={pass} onChange={e=>setPass(e.target.value)} placeholder="Password" type="password" style={inputStyle} onFocus={e=>e.target.style.borderColor=T.goldDim} onBlur={e=>e.target.style.borderColor="rgba(212,175,100,0.12)"} onKeyDown={e=>e.key==="Enter"&&handleSubmit()} />
           </div>
           {err&&<p style={{fontFamily:T.body,fontSize:12,color:"rgba(220,120,100,0.7)",marginTop:12,fontStyle:"italic"}}>{err}</p>}
-          <GoldBtn onClick={handleSubmit} style={{width:"100%",justifyContent:"center",marginTop:24,padding:"13px"}}>{mode==="login"?"Enter Orion":"Create Account"}</GoldBtn>
+          <GoldBtn onClick={handleSubmit} loading={loading} disabled={loading} style={{width:"100%",justifyContent:"center",marginTop:24,padding:"13px"}}>{mode==="login"?"Enter Orion":"Create Account"}</GoldBtn>
           <p style={{fontFamily:T.body,fontSize:12,color:T.textDim,textAlign:"center",marginTop:20,letterSpacing:"0.05em"}}>
             {mode==="login"?"New to Orion? ":"Already have an account? "}
             <span onClick={()=>{setMode(mode==="login"?"signup":"login");setErr("");}} style={{color:T.goldDim,cursor:"pointer",textDecoration:"underline",textDecorationColor:"rgba(212,175,100,0.3)"}}>
@@ -914,12 +980,9 @@ function DailyQuote({ profile }) {
     const key=`orion_quote_${getTodayKey()}`;
     const cached=sessionStorage.getItem(key);
     if(cached){setQuote(cached);setLoading(false);return;}
-    callClaude(
-      [{role:"user",content:`Generate one powerful, original quote (2-3 sentences max) for someone focused on: "${profile?.primaryGoal||"personal growth"}". No attribution. Private wisdom only.`}],
-      "You are a philosophical writer who crafts precise, luminous quotes for self-evolving individuals. Never use clichés. Write as if carving truth into stone.",200
-    ).then(q=>{
-      const clean=q.replace(/^["']|["']$/g,"").trim();
-      sessionStorage.setItem(key,clean); setQuote(clean); setLoading(false);
+    apiFetch("/ai/quote").then(d=>{
+      sessionStorage.setItem(key, d.quote);
+      setQuote(d.quote); setLoading(false);
     }).catch(()=>{setQuote("The most powerful thing you can do today is decide, clearly, who you are becoming.");setLoading(false);});
   },[]);
   return (
@@ -939,12 +1002,10 @@ function DailyInsight({ profile }) {
     const key=`orion_insight_${getTodayKey()}`;
     const cached=sessionStorage.getItem(key);
     if(cached){setInsight(cached);setLoading(false);return;}
-    const ctx=`Goal:${profile?.primaryGoal||"growth"}.Challenge:${profile?.biggestChallenge||"focus"}.Peak:${profile?.morningType||"morning"}.`;
-    callClaude(
-      [{role:"user",content:`Based on this user profile:${ctx} — give one specific, actionable daily insight (3-4 sentences). Be direct, strategic, warm.`}],
-      "You are Orion's strategic intelligence. Give precise, personalized daily guidance like a world-class mentor. Never be generic.",300
-    ).then(r=>{sessionStorage.setItem(key,r.trim());setInsight(r.trim());setLoading(false);})
-    .catch(()=>{setInsight("Your focus window is most powerful in the first 90 minutes after waking. Protect that time ruthlessly — no email, no social. Begin with your most cognitively demanding task while your mental reserves are at peak capacity.");setLoading(false);});
+    apiFetch("/ai/insight").then(d=>{
+      sessionStorage.setItem(key, d.insight);
+      setInsight(d.insight); setLoading(false);
+    }).catch(()=>{setInsight("Your focus window is most powerful in the first 90 minutes after waking. Protect that time ruthlessly.");setLoading(false);});
   },[]);
   return (
     <Card className="fadeUp fadeUp-3" style={{padding:"24px 28px"}}>
@@ -976,11 +1037,13 @@ function AIStrategist({ profile, vaultNotes }) {
     const userMsg={role:"user",content:input};
     const newMsgs=[...msgs,userMsg];
     setMsgs(newMsgs); setInput(""); setLoading(true);
-    const vaultCtx=vaultNotes?.length?`\n\nUser vault:\n${vaultNotes.map(n=>`- "${n.title}":${n.content?.slice(0,120)}`).join("\n")}` : "";
-    const sys=`You are Orion's strategic intelligence — a world-class mentor. Calm, precise, wise. Direct, actionable, never generic. Studied philosophy, psychology, strategy, peak performance.\nProfile: goal:${profile?.primaryGoal||"not set"}, challenge:${profile?.biggestChallenge||"not set"}, hours:${profile?.dailyHours||"not set"}, peak:${profile?.morningType||"not set"}${vaultCtx}\nKeep responses 2-4 paragraphs.`;
     try {
-      const reply=await callClaude(newMsgs.map(m=>({role:m.role,content:m.content})),sys,800);
-      setMsgs(m=>[...m,{role:"assistant",content:reply}]);
+      const history = newMsgs.slice(0,-1).map(m=>({role:m.role,content:m.content}));
+      const data = await apiFetch("/ai/strategist", {
+        method: "POST",
+        body: { message: input, history },
+      });
+      setMsgs(m=>[...m,{role:"assistant",content:data.reply}]);
     } catch { setMsgs(m=>[...m,{role:"assistant",content:"There was an issue connecting to the strategic intelligence. Please try again."}]); }
     setLoading(false);
   }
@@ -1026,13 +1089,9 @@ function DailyReading({ profile }) {
     const key=`orion_reading_${getTodayKey()}`;
     const cached=sessionStorage.getItem(key);
     if(cached){try{setReading(JSON.parse(cached));}catch{}setLoading(false);return;}
-    callClaude(
-      [{role:"user",content:`Create a short reading (180–220 words) relevant to someone focused on:"${profile?.primaryGoal||"personal growth"}". Choose: philosophy, cognitive science, strategy, stoicism, depth psychology. Give a compelling title. Return JSON:{"title":"...","topic":"...","content":"..."}`}],
-      "You are a scholar who creates elegant short readings for serious thinkers. Return only valid JSON, no markdown.",600
-    ).then(r=>{
-      try{const clean=r.replace(/```json|```/g,"").trim();const parsed=JSON.parse(clean);sessionStorage.setItem(key,JSON.stringify(parsed));setReading(parsed);}
-      catch{setReading({title:"On the Architecture of Attention",topic:"Cognitive Science",content:"Attention is not passive reception — it is an act of creation. Every moment you decide where to place your focus, you are sculpting the person you are becoming.\n\nThe ancient Stoics understood this intuitively. Marcus Aurelius wrote not to manage time, but to manage perception — to choose, with precision, what would be given the weight of significance. In this sense, attention is the most powerful currency you possess.\n\nModern neuroscience confirms what philosophy long suspected: the brain physically restructures itself around what we repeatedly attend to. Your habitual focus becomes your cognitive architecture.\n\nThe question, then, is not whether you will attend — you must. The question is whether your attention will be sovereign or surrendered. Each morning offers a moment of choice: what will you build today with the raw material of your focus?"});}
-      setLoading(false);
+    apiFetch("/ai/reading").then(d=>{
+      sessionStorage.setItem(key, JSON.stringify(d.reading));
+      setReading(d.reading); setLoading(false);
     }).catch(()=>setLoading(false));
   },[]);
   return (
@@ -1074,13 +1133,9 @@ function WeeklyDashboard({ trackingRefresh }) {
     setLoadingTarget(true);
     const key=`orion_weektarget_${getTodayKey()}_${stressLevel}`;
     try {
-      const r=await callClaude(
-        [{role:"user",content:`User stress/emotional state: "${stressLevel}". Current weekly calm/focus minutes logged: ${weekMins}. Recommend a realistic weekly target in minutes for calm, focused, or disciplined activity. Return ONLY a number between 300 and 2100 (representing minutes). No text.`}],
-        "You are a wellness strategist. Return only a plain integer number of minutes as the weekly target. No words, no units, just the number.",100
-      );
-      const mins=parseInt(r.trim().replace(/[^0-9]/g,""));
-      const target=isNaN(mins)?840:Math.max(300,Math.min(2100,mins));
-      localStorage.setItem(key,String(target));
+      const d = await apiFetch(`/focus/weekly-target?state=${encodeURIComponent(stressLevel)}`);
+      const target = d.target || 840;
+      localStorage.setItem(key, String(target));
       setWeekTarget(target);
     } catch { setWeekTarget(840); }
     setLoadingTarget(false);
@@ -1263,6 +1318,7 @@ function FocusModule({ onMinutesLogged }) {
             setTodayMins(newTotal);
             onMinutesLogged?.();
             setSessions(prev=>[{mode,duration:`${durations[mode]} min`,time:new Date().toTimeString().slice(0,5),mins:elapsed},...prev]);
+            apiFetch("/focus/sessions",{method:"POST",body:{duration_mins:elapsed,mode}}).catch(()=>{});
             setRunning(false); return 0;
           }
           return s-1;
@@ -2774,8 +2830,10 @@ function VaultModule({ notes, setNotes }) {
 
   async function summarize(note){
     setSummarizing(note.id);
-    try{const s=await callClaude([{role:"user",content:`Summarize in 2-3 sentences and extract one key actionable insight:\nTitle:${note.title}\nContent:${note.content}`}],"You are a thoughtful analyst. Distill knowledge with precision. Be concise.",250);setSummary(prev=>({...prev,[note.id]:s}));}
-    catch{setSummary(prev=>({...prev,[note.id]:"Could not generate summary."}));}
+    try{
+      const d = await apiFetch(`/ai/summarize/${note.id}`, { method: "POST" });
+      setSummary(prev=>({...prev,[note.id]:d.summary}));
+    } catch{setSummary(prev=>({...prev,[note.id]:"Could not generate summary."}));}
     setSummarizing(null);
   }
 
@@ -2910,22 +2968,62 @@ export default function App() {
   const [trackingRefresh,setTrackingRefresh]=useState(0);
   const [drawerOpen,setDrawerOpen]=useState(false);
 
+  // Restore session on page load
+  useEffect(()=>{
+    const token = tokenStore.get();
+    if (!token) return;
+    apiFetch("/auth/me").then(me => {
+      setUser(me);
+      if (me.onboardingDone) {
+        setProfile({
+          primaryGoal: me.primaryGoal,
+          dailyHours: me.dailyHours,
+          biggestChallenge: me.biggestChallenge,
+          morningType: me.morningType,
+        });
+        setScreen("app");
+        setTimeout(()=>setContentVis(true), 300);
+      } else {
+        setScreen("auth");
+      }
+    }).catch(()=>{ tokenStore.clear(); });
+  },[]);
+
   function handleEntryDone(){setScreen("auth");}
 
-  function handleAuth(u){
+  async function handleAuth(u){
     setUser(u);
-    if(u.isNew){setScreen("onboarding");}
-    else{
-      setProfile({primaryGoal:"Deep Work & Productivity",biggestChallenge:"Distraction & digital noise",morningType:"Morning (8–11am)",dailyHours:"3–4 hours"});
-      setScreen("app"); setTimeout(()=>setContentVis(true),300);
+    // Restore profile from backend
+    try {
+      const me = await apiFetch("/auth/me");
+      setUser(me);
+      if (!me.onboardingDone) {
+        setScreen("onboarding");
+      } else {
+        setProfile({
+          primaryGoal: me.primaryGoal,
+          dailyHours: me.dailyHours,
+          biggestChallenge: me.biggestChallenge,
+          morningType: me.morningType,
+        });
+        setScreen("app");
+        setTimeout(() => setContentVis(true), 300);
+      }
+    } catch {
+      setScreen("onboarding");
     }
   }
 
-  function handleOnboarding(answers){
-    setProfile(answers); setScreen("app"); setTimeout(()=>setContentVis(true),300);
+  async function handleOnboarding(answers){
+    setProfile(answers);
+    try { await apiFetch("/auth/onboarding", { method: "POST", body: answers }); } catch {}
+    setScreen("app");
+    setTimeout(()=>setContentVis(true),300);
   }
 
-  function handleLogout(){
+  async function handleLogout(){
+    try { await apiFetch("/auth/logout", { method: "POST" }); } catch {}
+    tokenStore.clear();
     setUser(null); setProfile(null); setScreen("entry"); setContentVis(false);
     ambientEngine.stop();
     sessionStorage.clear();
